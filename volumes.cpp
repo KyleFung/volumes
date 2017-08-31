@@ -1,12 +1,11 @@
 #include <GL/glew.h>
 
-#include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-#include <ctime>
 #include <iostream>
 #include <fstream>
+#include <vector>
 
 #include "volumes.h"
 
@@ -46,6 +45,9 @@ int main(int argc, char** argv) {
     viewUni = glGetUniformLocation(shaderProgram, "view");
     projUni = glGetUniformLocation(shaderProgram, "proj");
 
+    // Ray tracing uniforms
+    camUni = glGetUniformLocation(shaderProgram, "cameraPos");
+
     // Bind attributes
     GLint posAttrib = glGetAttribLocation(shaderProgram, "position");
     GLint texAttrib = glGetAttribLocation(shaderProgram, "texcoord");
@@ -56,7 +58,7 @@ int main(int argc, char** argv) {
 
     // Begin
     glutIdleFunc(drawScene);
-    glClearColor(0.5, 0.25, 0.75, 1.0);
+    glClearColor(0.9, 0.9, 0.9, 1.0);
     glutMainLoop();
     return 0;
 }
@@ -70,10 +72,18 @@ void drawScene() {
     updateMatrix(transUni, trans);
 
     // Do view and projection
-    glm::mat4 view = glm::lookAt(glm::vec3(0.0f, 0.0f, 5.0f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::mat4 view = glm::lookAt(cameraPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     updateMatrix(viewUni, view);
     glm::mat4 proj = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 1.0f, 10.0f);
     updateMatrix(projUni, proj);
+
+    // Ray casting uniforms
+    glm::vec3 texelPos = cameraPos;
+    glm::vec4 cornerPos = trans * glm::vec4(-0.5f, -0.5f, -0.5f, 1.0f);
+    cornerPos /= cornerPos.w;
+    texelPos -= glm::vec3(cornerPos);
+    texelPos = glm::vec3(glm::transpose(trans) * glm::vec4(texelPos, 1.0f));
+    updateVec3(camUni, texelPos);
 
     // Draw the scene
     glDrawArrays(GL_TRIANGLES, 0, sizeof(vert) / vertSize);
@@ -106,16 +116,22 @@ GLuint loadTexture3D(GLuint shaderProgram) {
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     // Load in image
-    int width = 2, height = 2, depth = 2;
-    float cube[] = {0.0f, 0.0f, 0.0f,
-                    1.0f, 1.0f, 1.0f,
-                    1.0f, 1.0f, 1.0f,
-                    0.0f, 0.0f, 0.0f,
-                    1.0f, 1.0f, 1.0f,
-                    0.0f, 0.0f, 0.0f,
-                    0.0f, 0.0f, 0.0f,
-                    1.0f, 1.0f, 1.0f};
-    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGB8, width, height, depth, 0, GL_RGB, GL_FLOAT, cube);
+    int len = 20;
+    float l = len;
+    std::vector<float> cube;
+    glm::vec3 cen(0.5f);
+    for(int i = 0; i < len; i++) {
+        for(int j = 0; j < len; j++) {
+            for(int k = 0; k < len; k++) {
+                glm::vec3 p(i/l, j/l, k/l);
+                float d = glm::distance(p, cen);
+                cube.push_back(d);
+                cube.push_back(d);
+                cube.push_back(d);
+            }
+        }
+    }
+    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGB8, len, len, len, 0, GL_RGB, GL_FLOAT, &cube[0]);
     glUniform1i(glGetUniformLocation(shaderProgram, "sampler"), 0);
     return tex;
 }
@@ -133,6 +149,13 @@ GLuint compileProgram(std::string vert, std::string frag) {
     glCompileShader(fragShader);
     delete[] fragChar;
 
+    GLint status;
+    glGetShaderiv(fragShader, GL_COMPILE_STATUS, &status);
+    char buffer[512];
+    glGetShaderInfoLog(fragShader, 512, NULL, buffer);
+
+    std::cout << buffer;
+
     GLuint shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vertexShader);
     glAttachShader(shaderProgram, fragShader);
@@ -146,4 +169,8 @@ GLuint compileProgram(std::string vert, std::string frag) {
 
 void updateMatrix(GLuint uniform, glm::mat4 matrix) {
     glUniformMatrix4fv(uniform, 1, GL_FALSE, glm::value_ptr(matrix));
+}
+
+void updateVec3(GLuint uniform, glm::vec3 vec) {
+    glUniform3fv(uniform, 1, glm::value_ptr(vec));
 }
